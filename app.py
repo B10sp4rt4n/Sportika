@@ -191,6 +191,22 @@ with tabs[0]:
         st.success(f"{len(df)} filas cargadas para {sport}.")
         st.dataframe(df.head(50), use_container_width=True)
 
+    # Sección pública para descargar templates base
+    st.markdown("---")
+    st.markdown("### Descarga directa de templates base (encabezados)")
+    for key, cols in FREE_SCHEMAS.items():
+        template_path = os.path.join("data", "templates", key, f"template_{key.lower().replace(' ','_')}_base.csv")
+        if os.path.exists(template_path):
+            with open(template_path, "rb") as f:
+                st.download_button(
+                    f"Descargar template base {key}",
+                    f,
+                    file_name=f"template_{key.lower().replace(' ','_')}_base.csv",
+                    key=f"dl_base_{key}"
+                )
+        else:
+            st.info(f"No hay template base disponible para {key}.")
+
 with tabs[1]:
     st.subheader("Visualización básica")
     df = st.session_state.get("dataframes",{}).get(sport)
@@ -541,3 +557,14 @@ with tabs[5]:
                     st.warning(f"Template '{tfile}' eliminado.")
     else:
         st.info("No hay templates personalizados para este deporte.")
+        # Generar template base con encabezados
+        import io
+        base_csv = io.StringIO()
+        pd.DataFrame(columns=FREE_SCHEMAS[sport_sel]).to_csv(base_csv, index=False)
+        st.download_button(
+            "Descargar template base (encabezados)",
+            base_csv.getvalue(),
+            file_name=f"template_{sport_sel.lower().replace(' ','_')}_base.csv",
+            mime="text/csv",
+            key=f"dl_base_{sport_sel}"
+        )
