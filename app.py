@@ -393,7 +393,9 @@ with premium_tabs[0]:
     st.subheader("Escenarios A/B/C — compara proyecciones")
     st.markdown("Guarda hasta **3 escenarios** con tus proyecciones y compáralos lado a lado.")
     if "escenarios" not in st.session_state:
-        st.session_state["escenarios"] = {}  # {sport: {label: dataframe_sim}}
+        st.session_state["escenarios"] = {}
+    if sport_s not in st.session_state["escenarios"]:
+        st.session_state["escenarios"][sport_s] = {}
 
     col_sel, col_label = st.columns([2,1])
     with col_sel:
