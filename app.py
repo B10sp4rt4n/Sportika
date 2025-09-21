@@ -144,7 +144,14 @@ with st.sidebar:
     st.divider()
     st.caption("Tip: Descarga los CSV de ejemplo en la pestaña 'Demo & Datos'.")
 
-tabs = st.tabs(["🏟️ Demo & Datos","📈 Visualización básica","🧪 Proyecciones (simula)","📥 Generar Excel","🔒 Zona Premium"])
+tabs = st.tabs([
+    "🏟️ Demo & Datos",
+    "📈 Visualización básica",
+    "🧪 Proyecciones (simula)",
+    "📥 Generar Excel",
+    "🔒 Zona Premium",
+    "🗂️ Administrar Templates"
+])
 
 def _demo_paths():
     return {
@@ -501,3 +508,36 @@ with premium_tabs[1]:
             tbl = compute_nfl_table(sim)
             st.dataframe(tbl, use_container_width=True)
             st.bar_chart(tbl.set_index("Equipo")["W"])
+
+with tabs[5]:
+    st.subheader("🗂️ Administrar Templates personalizados")
+    st.markdown("Sube, descarga o elimina tus propios templates (CSV) para cada deporte.")
+    sport_sel = st.selectbox("Deporte para template", list(FREE_SCHEMAS.keys()), key="template_sport")
+    template_dir = os.path.join("data", "templates", sport_sel)
+    os.makedirs(template_dir, exist_ok=True)
+
+    # Subir template
+    uploaded_template = st.file_uploader("Sube un template CSV", type=["csv"], key="uploader_template")
+    if uploaded_template:
+        save_path = os.path.join(template_dir, uploaded_template.name)
+        with open(save_path, "wb") as f:
+            f.write(uploaded_template.read())
+        st.success(f"Template '{uploaded_template.name}' guardado para {sport_sel}.")
+
+    # Listar y descargar templates
+    templates = [f for f in os.listdir(template_dir) if f.endswith('.csv')]
+    if templates:
+        st.markdown("### Templates disponibles:")
+        for tfile in templates:
+            tpath = os.path.join(template_dir, tfile)
+            col1, col2 = st.columns([3,1])
+            with col1:
+                st.markdown(f"- {tfile}")
+            with col2:
+                with open(tpath, "rb") as f:
+                    st.download_button("Descargar", f, file_name=tfile, key=f"dl_{tfile}")
+                if st.button("Eliminar", key=f"del_{tfile}"):
+                    os.remove(tpath)
+                    st.warning(f"Template '{tfile}' eliminado.")
+    else:
+        st.info("No hay templates personalizados para este deporte.")
