@@ -225,7 +225,14 @@ with tabs[2]:
     st.subheader("Proyecciones (simula con tus propias plantillas)")
     st.markdown("1) **Descarga la plantilla de proyección** del deporte elegido.\n\n2) **Rellénala** con tus supuestos.\n\n3) **Súbela** aquí para recalcular tablas con esos escenarios.")
     proj_paths = _proj_template_paths()
-    st.download_button("Descargar plantilla de proyección "+sport, open(proj_paths[sport],"rb"), file_name=f"plantilla_proyecciones_{sport.lower().replace(' ','_')}.csv")
+    if sport in proj_paths:
+        st.download_button(
+            "Descargar plantilla de proyección "+sport,
+            open(proj_paths[sport],"rb"),
+            file_name=f"plantilla_proyecciones_{sport.lower().replace(' ','_')}.csv"
+        )
+    else:
+        st.warning(f"No hay plantilla de proyección disponible para {sport}.")
     proj_file = st.file_uploader("Sube CSV de PROYECCIONES", type=["csv"], key="uploader_proj")
     df = st.session_state.get("dataframes",{}).get(sport)
     if df is None:
