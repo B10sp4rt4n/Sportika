@@ -173,10 +173,11 @@ with tabs[0]:
     st.subheader("Demo & Datos")
     demo_paths = _demo_paths()
     st.markdown("Descarga un **CSV de ejemplo** con datos ficticios:")
-    if sport in demo_paths:
+    demo_file_path = demo_paths.get(sport)
+    if demo_file_path and os.path.exists(demo_file_path):
         st.download_button(
             "Descargar CSV demo "+sport,
-            open(demo_paths[sport],"rb"),
+            open(demo_file_path,"rb"),
             file_name=f"{sport.lower().replace(' ','_')}_demo.csv"
         )
     else:
@@ -187,9 +188,14 @@ with tabs[0]:
         st.session_state["dataframes"] = {}
     if file:
         df = pd.read_csv(file)
-        st.session_state["dataframes"][sport] = df
-        st.success(f"{len(df)} filas cargadas para {sport}.")
-        st.dataframe(df.head(50), use_container_width=True)
+        # Validar esquema
+        expected_cols = FREE_SCHEMAS.get(sport) or FREE_SCHEMAS.get(sport.replace(' ',''))
+        if expected_cols and not set(expected_cols).issubset(df.columns):
+            st.error(f"El archivo no tiene el esquema correcto. Se esperaban las columnas: {', '.join(expected_cols)}. Columnas encontradas: {', '.join(df.columns)}")
+        else:
+            st.session_state["dataframes"][sport] = df
+            st.success(f"{len(df)} filas cargadas para {sport}.")
+            st.dataframe(df.head(50), use_container_width=True)
 
     # Sección pública para descargar templates base
     st.markdown("---")
