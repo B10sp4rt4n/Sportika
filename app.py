@@ -1,11 +1,35 @@
-
 import streamlit as st
 import os
 import pandas as pd
 from io import BytesIO
-
 import sqlite3, json, os
 DB_PATH = os.path.join(os.path.dirname(__file__), "app_data.db")
+
+def ensure_tables():
+    con = sqlite3.connect(DB_PATH)
+    cur = con.cursor()
+    cur.execute('''CREATE TABLE IF NOT EXISTS users (
+        username TEXT PRIMARY KEY,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS scenarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        username TEXT,
+        sport TEXT,
+        label TEXT,
+        payload_json TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    cur.execute('''CREATE TABLE IF NOT EXISTS entitlements (
+        username TEXT PRIMARY KEY,
+        is_premium INTEGER DEFAULT 0,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )''')
+    con.commit()
+    con.close()
+
+# Crear tablas al inicio de la app
+ensure_tables()
 
 def ensure_user(username: str):
     if not username:
