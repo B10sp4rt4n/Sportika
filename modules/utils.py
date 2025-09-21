@@ -8,7 +8,17 @@ FREE_SCHEMAS = {
 }
 
 def validate_schema(df, schema):
-    return set(schema).issubset(df.columns)
+    # schema puede ser una lista de columnas o el nombre del deporte
+    if isinstance(schema, str):
+        expected = FREE_SCHEMAS.get(schema) or FREE_SCHEMAS.get(schema.replace(' ',''))
+    else:
+        expected = schema
+    expected = list(expected) if expected else []
+    cols = set(df.columns)
+    expected_set = set(expected)
+    missing = [col for col in expected if col not in cols]
+    extra = [col for col in df.columns if col not in expected_set]
+    return missing, extra, expected
 
 def compute_standings_laliga(df):
     return df.sort_values("Puntos", ascending=False)
