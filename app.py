@@ -166,7 +166,14 @@ with tabs[0]:
     st.subheader("Demo & Datos")
     demo_paths = _demo_paths()
     st.markdown("Descarga un **CSV de ejemplo** con datos ficticios:")
-    st.download_button("Descargar CSV demo "+sport, open(demo_paths[sport],"rb"), file_name=f"{sport.lower().replace(' ','_')}_demo.csv")
+    if sport in demo_paths:
+        st.download_button(
+            "Descargar CSV demo "+sport,
+            open(demo_paths[sport],"rb"),
+            file_name=f"{sport.lower().replace(' ','_')}_demo.csv"
+        )
+    else:
+        st.warning(f"No hay demo disponible para {sport}.")
     st.markdown("O **sube tu propio CSV** con el esquema indicado.")
     file = st.file_uploader("Sube CSV base (DATA)", type=["csv"], key="uploader_data")
     if "dataframes" not in st.session_state:
