@@ -24,7 +24,8 @@ def compute_standings_laliga(df):
     return df.sort_values("Puntos", ascending=False)
 
 def compute_f1_points(df):
-    return df.sort_values("Puntos", ascending=False)
+    # Retorna dos valores: el DataFrame ordenado y un DataFrame vacío como placeholder
+    return df.sort_values("Puntos", ascending=False), pd.DataFrame()
 
 def compute_mlb_summary(df):
     return df
