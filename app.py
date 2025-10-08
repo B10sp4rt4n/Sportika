@@ -2,31 +2,85 @@ import streamlit as st
 import os
 import pandas as pd
 from io import BytesIO
-import sqlite3, json, os
+import sqlite3
+import json
 DB_PATH = os.path.join(os.path.dirname(__file__), "app_data.db")
 
 def ensure_tables():
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-    cur.execute('''CREATE TABLE IF NOT EXISTS users (
-        username TEXT PRIMARY KEY,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS scenarios (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        username TEXT,
-        sport TEXT,
-        label TEXT,
-        payload_json TEXT,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    cur.execute('''CREATE TABLE IF NOT EXISTS entitlements (
-        username TEXT PRIMARY KEY,
-        is_premium INTEGER DEFAULT 0,
-        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )''')
-    con.commit()
-    con.close()
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        
+        # Tablas existentes
+        cur.execute('''CREATE TABLE IF NOT EXISTS users (
+            username TEXT PRIMARY KEY,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS scenarios (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            sport TEXT,
+            label TEXT,
+            payload_json TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        cur.execute('''CREATE TABLE IF NOT EXISTS entitlements (
+            username TEXT PRIMARY KEY,
+            is_premium INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Nuevas tablas para datos deportivos
+        cur.execute('''CREATE TABLE IF NOT EXISTS datasets (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            username TEXT,
+            sport TEXT,
+            name TEXT,
+            is_projection INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
+        
+        # Tabla para partidos de fútbol (La Liga, NFL)
+        cur.execute('''CREATE TABLE IF NOT EXISTS matches (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dataset_id INTEGER,
+            local TEXT,
+            visitante TEXT,
+            goles_local INTEGER DEFAULT 0,
+            goles_visitante INTEGER DEFAULT 0,
+            puntos_local INTEGER DEFAULT 0,
+            puntos_visitante INTEGER DEFAULT 0,
+            FOREIGN KEY (dataset_id) REFERENCES datasets (id)
+        )''')
+        
+        # Tabla para carreras de F1
+        cur.execute('''CREATE TABLE IF NOT EXISTS f1_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dataset_id INTEGER,
+            piloto TEXT,
+            equipo TEXT,
+            puntos INTEGER DEFAULT 0,
+            carrera TEXT DEFAULT '',
+            FOREIGN KEY (dataset_id) REFERENCES datasets (id)
+        )''')
+        
+        # Tabla para juegos de MLB
+        cur.execute('''CREATE TABLE IF NOT EXISTS mlb_games (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dataset_id INTEGER,
+            equipo_local TEXT,
+            equipo_visitante TEXT,
+            hr_local INTEGER DEFAULT 0,
+            hr_visitante INTEGER DEFAULT 0,
+            runs_local INTEGER DEFAULT 0,
+            runs_visitante INTEGER DEFAULT 0,
+            FOREIGN KEY (dataset_id) REFERENCES datasets (id)
+        )''')
+        
+        con.commit()
+        con.close()
+    except Exception as e:
+        st.error(f"Error al inicializar la base de datos: {str(e)}")
 
 # Crear tablas al inicio de la app
 ensure_tables()
@@ -34,23 +88,30 @@ ensure_tables()
 def ensure_user(username: str):
     if not username:
         return
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-    cur.execute("INSERT OR IGNORE INTO users(username) VALUES(?)", (username,))
-    con.commit()
-    con.close()
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("INSERT OR IGNORE INTO users(username) VALUES(?)", (username,))
+        con.commit()
+        con.close()
+    except Exception as e:
+        st.error(f"Error al registrar usuario: {str(e)}")
 
 def save_scenario(username: str, sport: str, label: str, resumen_df):
     if not username:
         return False
-    payload = resumen_df.to_json(orient="records", force_ascii=False)
-    con = sqlite3.connect(DB_PATH)
-    cur = con.cursor()
-    cur.execute("""INSERT INTO scenarios(username, sport, label, payload_json)
-                   VALUES(?,?,?,?)""", (username, sport, label, payload))
-    con.commit()
-    con.close()
-    return True
+    try:
+        payload = resumen_df.to_json(orient="records", force_ascii=False)
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("""INSERT INTO scenarios(username, sport, label, payload_json)
+                       VALUES(?,?,?,?)""", (username, sport, label, payload))
+        con.commit()
+        con.close()
+        return True
+    except Exception as e:
+        st.error(f"Error al guardar escenario: {str(e)}")
+        return False
 
 def load_scenarios(username: str, sport: str):
     con = sqlite3.connect(DB_PATH)
@@ -87,6 +148,125 @@ def is_premium(username: str) -> bool:
     row = cur.fetchone()
     con.close()
     return bool(row[0]) if row else False
+
+# Funciones para gestión de datasets deportivos
+def create_dataset(username: str, sport: str, name: str, is_projection: bool = False) -> int:
+    """Crea un nuevo dataset y retorna su ID"""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("INSERT INTO datasets (username, sport, name, is_projection) VALUES (?, ?, ?, ?)",
+                   (username, sport, name, 1 if is_projection else 0))
+        dataset_id = cur.lastrowid
+        con.commit()
+        con.close()
+        return dataset_id
+    except Exception as e:
+        st.error(f"Error al crear dataset: {str(e)}")
+        return None
+
+def get_datasets(username: str, sport: str = None):
+    """Obtiene los datasets del usuario"""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        if sport:
+            cur.execute("SELECT id, sport, name, is_projection, created_at FROM datasets WHERE username=? AND sport=? ORDER BY created_at DESC", 
+                       (username, sport))
+        else:
+            cur.execute("SELECT id, sport, name, is_projection, created_at FROM datasets WHERE username=? ORDER BY created_at DESC", 
+                       (username,))
+        datasets = cur.fetchall()
+        con.close()
+        return datasets
+    except Exception as e:
+        st.error(f"Error al obtener datasets: {str(e)}")
+        return []
+
+def delete_dataset(dataset_id: int):
+    """Elimina un dataset y todos sus datos relacionados"""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        cur.execute("DELETE FROM matches WHERE dataset_id=?", (dataset_id,))
+        cur.execute("DELETE FROM f1_results WHERE dataset_id=?", (dataset_id,))
+        cur.execute("DELETE FROM mlb_games WHERE dataset_id=?", (dataset_id,))
+        cur.execute("DELETE FROM datasets WHERE id=?", (dataset_id,))
+        con.commit()
+        con.close()
+        return True
+    except Exception as e:
+        st.error(f"Error al eliminar dataset: {str(e)}")
+        return False
+
+def import_csv_to_dataset(df, dataset_id: int, sport: str):
+    """Importa datos de un DataFrame CSV a las tablas SQLite"""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        cur = con.cursor()
+        
+        if sport == "La Liga":
+            for _, row in df.iterrows():
+                cur.execute("""INSERT INTO matches (dataset_id, local, visitante, goles_local, goles_visitante) 
+                              VALUES (?, ?, ?, ?, ?)""", 
+                           (dataset_id, row['Local'], row['Visitante'], 
+                            row['Goles_Local'], row['Goles_Visitante']))
+        
+        elif sport == "F1":
+            for _, row in df.iterrows():
+                cur.execute("""INSERT INTO f1_results (dataset_id, piloto, equipo, puntos) 
+                              VALUES (?, ?, ?, ?)""", 
+                           (dataset_id, row['Piloto'], row['Equipo'], row['Puntos']))
+        
+        elif sport == "MLB":
+            for _, row in df.iterrows():
+                cur.execute("""INSERT INTO mlb_games (dataset_id, equipo_local, equipo_visitante, hr_local, hr_visitante) 
+                              VALUES (?, ?, ?, ?, ?)""", 
+                           (dataset_id, row['Equipo_Local'], row['Equipo_Visitante'], 
+                            row['HR_Local'], row['HR_Visitante']))
+        
+        elif sport == "NFL":
+            for _, row in df.iterrows():
+                cur.execute("""INSERT INTO matches (dataset_id, local, visitante, puntos_local, puntos_visitante) 
+                              VALUES (?, ?, ?, ?, ?)""", 
+                           (dataset_id, row['Local'], row['Visitante'], 
+                            row['Puntos_Local'], row['Puntos_Visitante']))
+        
+        con.commit()
+        con.close()
+        return True
+    except Exception as e:
+        st.error(f"Error al importar datos: {str(e)}")
+        return False
+
+def get_dataset_data(dataset_id: int, sport: str):
+    """Obtiene los datos de un dataset como DataFrame"""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        
+        if sport == "La Liga":
+            df = pd.read_sql_query("""SELECT local AS Local, visitante AS Visitante, 
+                                     goles_local AS Goles_Local, goles_visitante AS Goles_Visitante 
+                                     FROM matches WHERE dataset_id=?""", con, params=(dataset_id,))
+        elif sport == "F1":
+            df = pd.read_sql_query("""SELECT piloto AS Piloto, equipo AS Equipo, puntos AS Puntos 
+                                     FROM f1_results WHERE dataset_id=?""", con, params=(dataset_id,))
+        elif sport == "MLB":
+            df = pd.read_sql_query("""SELECT equipo_local AS Equipo_Local, equipo_visitante AS Equipo_Visitante,
+                                     hr_local AS HR_Local, hr_visitante AS HR_Visitante 
+                                     FROM mlb_games WHERE dataset_id=?""", con, params=(dataset_id,))
+        elif sport == "NFL":
+            df = pd.read_sql_query("""SELECT local AS Local, visitante AS Visitante,
+                                     puntos_local AS Puntos_Local, puntos_visitante AS Puntos_Visitante 
+                                     FROM matches WHERE dataset_id=?""", con, params=(dataset_id,))
+        else:
+            df = pd.DataFrame()
+        
+        con.close()
+        return df
+    except Exception as e:
+        st.error(f"Error al obtener datos del dataset: {str(e)}")
+        return pd.DataFrame()
 
 from modules.utils import FREE_SCHEMAS, validate_schema, compute_standings_laliga, compute_f1_points, compute_mlb_summary, compute_nfl_table, merge_laliga_with_projections, merge_concat
 
@@ -146,11 +326,12 @@ with st.sidebar:
 
 tabs = st.tabs([
     "🏟️ Demo & Datos",
-    "📈 Visualización básica",
+    "📈 Visualización básica", 
     "🧪 Proyecciones (simula)",
     "📥 Generar Excel",
     "🔒 Zona Premium",
-    "🗂️ Administrar Templates"
+    "🗂️ Administrar Templates",
+    "🗄️ Gestión Datasets"
 ])
 
 def _demo_paths():
@@ -182,20 +363,63 @@ with tabs[0]:
         )
     else:
         st.warning(f"No hay demo disponible para {sport}.")
-    st.markdown("O **sube tu propio CSV** con el esquema indicado.")
-    file = st.file_uploader("Sube CSV base (DATA)", type=["csv"], key="uploader_data")
-    if "dataframes" not in st.session_state:
-        st.session_state["dataframes"] = {}
-    if file:
-        df = pd.read_csv(file)
-        # Validar esquema
-        expected_cols = FREE_SCHEMAS.get(sport) or FREE_SCHEMAS.get(sport.replace(' ',''))
-        if expected_cols and not set(expected_cols).issubset(df.columns):
-            st.error(f"El archivo no tiene el esquema correcto. Se esperaban las columnas: {', '.join(expected_cols)}. Columnas encontradas: {', '.join(df.columns)}")
+    
+    st.markdown("### Gestión de Datasets")
+    st.markdown("Carga y gestiona tus datos directamente en la base de datos SQLite.")
+    
+    # Selector de dataset existente
+    username = st.session_state.get("username", "")
+    datasets = get_datasets(username, sport)
+    
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        if datasets:
+            dataset_options = {f"{d[2]} ({'Proyección' if d[3] else 'Base'}) - {d[4][:10]}": d[0] 
+                             for d in datasets}
+            selected_dataset_name = st.selectbox("Dataset activo", list(dataset_options.keys()))
+            selected_dataset_id = dataset_options.get(selected_dataset_name)
+            st.session_state["selected_dataset_id"] = selected_dataset_id
         else:
-            st.session_state["dataframes"][sport] = df
-            st.success(f"{len(df)} filas cargadas para {sport}.")
-            st.dataframe(df.head(50), use_container_width=True)
+            st.info("No hay datasets para este deporte. Crea uno nuevo subiendo un CSV.")
+            st.session_state["selected_dataset_id"] = None
+    
+    with col2:
+        if datasets and st.button("🗑️ Eliminar Dataset"):
+            if delete_dataset(st.session_state.get("selected_dataset_id")):
+                st.success("Dataset eliminado correctamente")
+                st.rerun()
+    
+    # Carga de nuevo CSV
+    st.markdown("### Subir nuevo CSV")
+    dataset_name = st.text_input("Nombre del dataset", value=f"{sport} - {pd.Timestamp.now().strftime('%Y%m%d_%H%M')}")
+    is_projection = st.checkbox("Es una proyección (datos futuros)")
+    file = st.file_uploader("Sube CSV", type=["csv"], key="uploader_data")
+    
+    if file and dataset_name:
+        try:
+            df = pd.read_csv(file)
+            # Validar esquema
+            expected_cols = FREE_SCHEMAS.get(sport) or FREE_SCHEMAS.get(sport.replace(' ',''))
+            if expected_cols and not set(expected_cols).issubset(df.columns):
+                st.error(f"El archivo no tiene el esquema correcto. Se esperaban las columnas: {', '.join(expected_cols)}. Columnas encontradas: {', '.join(df.columns)}")
+            else:
+                # Crear dataset y guardar datos
+                dataset_id = create_dataset(username, sport, dataset_name, is_projection)
+                if dataset_id and import_csv_to_dataset(df, dataset_id, sport):
+                    st.success(f"Dataset '{dataset_name}' creado con {len(df)} filas.")
+                    st.session_state["selected_dataset_id"] = dataset_id
+                    st.rerun()
+        except Exception as e:
+            st.error(f"Error al cargar el archivo CSV: {str(e)}")
+            st.info("Asegúrate de que el archivo esté en formato CSV válido.")
+    
+    # Mostrar datos del dataset seleccionado
+    if st.session_state.get("selected_dataset_id"):
+        dataset_data = get_dataset_data(st.session_state["selected_dataset_id"], sport)
+        if not dataset_data.empty:
+            st.markdown("### Vista previa de datos")
+            st.dataframe(dataset_data.head(50), use_container_width=True)
+            st.caption(f"Mostrando primeras 50 filas de {len(dataset_data)} total")
 
     # Sección pública para descargar templates base
     st.markdown("---")
@@ -215,161 +439,206 @@ with tabs[0]:
 
 with tabs[1]:
     st.subheader("Visualización básica")
-    df = st.session_state.get("dataframes",{}).get(sport)
-    if df is None:
-        st.info("Carga un CSV en la pestaña 'Demo & Datos'.")
+    dataset_id = st.session_state.get("selected_dataset_id")
+    
+    if not dataset_id:
+        st.info("Selecciona un dataset en la pestaña 'Demo & Datos'.")
     else:
-        missing, extra, expected = validate_schema(df, sport)
-        if missing:
-            st.error(f"Columnas faltantes: {missing}")
+        df = get_dataset_data(dataset_id, sport)
+        if df.empty:
+            st.warning("El dataset seleccionado no tiene datos.")
         else:
-            if sport=="La Liga":
-                table = compute_standings_laliga(df)
-                st.markdown("**Tabla de posiciones (regla 3-1-0):**")
-                st.dataframe(table, use_container_width=True)
-                st.bar_chart(table.set_index("Equipo")["PTS"])
-            elif sport=="F1":
-                drv, cons = compute_f1_points(df)
-                col1,col2 = st.columns(2)
-                with col1:
-                    st.markdown("**Pilotos:**")
-                    st.dataframe(drv, use_container_width=True)
-                    st.bar_chart(drv.set_index("Piloto")["Puntos"])
-                with col2:
-                    st.markdown("**Constructores:**")
-                    st.dataframe(cons, use_container_width=True)
-                    st.bar_chart(cons.set_index("Equipo")["Puntos"])
-            elif sport=="MLB":
-                summ = compute_mlb_summary(df)
-                st.markdown("**Resumen por equipo (ficticio):**")
-                st.dataframe(summ, use_container_width=True)
-                st.bar_chart(summ.set_index("Equipo")["R"])
-            elif sport=="NFL":
-                tbl = compute_nfl_table(df)
-                st.markdown("**Tabla NFL (ficticia):**")
-                st.dataframe(tbl, use_container_width=True)
-                st.bar_chart(tbl.set_index("Equipo")["W"])
+            missing, extra, expected = validate_schema(df, sport)
+            if missing:
+                st.error(f"Columnas faltantes: {missing}")
+            else:
+                if sport=="La Liga":
+                    table = compute_standings_laliga(df)
+                    st.markdown("**Tabla de posiciones (regla 3-1-0):**")
+                    st.dataframe(table, use_container_width=True)
+                    st.bar_chart(table.set_index("Equipo")["PTS"])
+                elif sport=="F1":
+                    drv, cons = compute_f1_points(df)
+                    col1,col2 = st.columns(2)
+                    with col1:
+                        st.markdown("**Pilotos:**")
+                        st.dataframe(drv, use_container_width=True)
+                        st.bar_chart(drv.set_index("Piloto")["Puntos"])
+                    with col2:
+                        st.markdown("**Constructores:**")
+                        st.dataframe(cons, use_container_width=True)
+                        st.bar_chart(cons.set_index("Equipo")["Puntos"])
+                elif sport=="MLB":
+                    summ = compute_mlb_summary(df)
+                    st.markdown("**Resumen por equipo (ficticio):**")
+                    st.dataframe(summ, use_container_width=True)
+                    st.bar_chart(summ.set_index("Equipo")["R"])
+                elif sport=="NFL":
+                    tbl = compute_nfl_table(df)
+                    st.markdown("**Tabla NFL (ficticia):**")
+                    st.dataframe(tbl, use_container_width=True)
+                    st.bar_chart(tbl.set_index("Equipo")["W"])
 
 with tabs[2]:
-    st.subheader("Proyecciones (simula con tus propias plantillas)")
-    st.markdown("1) **Descarga la plantilla de proyección** del deporte elegido.\n\n2) **Rellénala** con tus supuestos.\n\n3) **Súbela** aquí para recalcular tablas con esos escenarios.")
+    st.subheader("Proyecciones (simula con datasets combinados)")
+    st.markdown("1) **Selecciona un dataset base** (datos reales)\n\n2) **Selecciona un dataset de proyección** (escenarios futuros)\n\n3) **Combína ambos** para ver resultados simulados")
+    
+    username = st.session_state.get("username", "")
+    datasets = get_datasets(username, sport)
+    
+    # Separar datasets base y proyecciones
+    base_datasets = [(d[0], d[2], d[4]) for d in datasets if not d[3]]  # is_projection = 0
+    proj_datasets = [(d[0], d[2], d[4]) for d in datasets if d[3]]      # is_projection = 1
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown("**Dataset Base (datos reales):**")
+        if base_datasets:
+            base_options = {f"{name} - {date[:10]}": id for id, name, date in base_datasets}
+            selected_base = st.selectbox("Selecciona dataset base", list(base_options.keys()))
+            base_dataset_id = base_options.get(selected_base)
+        else:
+            st.warning("No hay datasets base disponibles")
+            base_dataset_id = None
+    
+    with col2:
+        st.markdown("**Dataset Proyección (escenarios):**")
+        if proj_datasets:
+            proj_options = {f"{name} - {date[:10]}": id for id, name, date in proj_datasets}
+            selected_proj = st.selectbox("Selecciona dataset proyección", list(proj_options.keys()))
+            proj_dataset_id = proj_options.get(selected_proj)
+        else:
+            st.warning("No hay datasets de proyección disponibles")
+            proj_dataset_id = None
+    
+    # Descargar plantilla de proyección
     proj_paths = _proj_template_paths()
     if sport in proj_paths:
         st.download_button(
-            "Descargar plantilla de proyección "+sport,
+            "📥 Descargar plantilla de proyección " + sport,
             open(proj_paths[sport],"rb"),
             file_name=f"plantilla_proyecciones_{sport.lower().replace(' ','_')}.csv"
         )
-    else:
-        st.warning(f"No hay plantilla de proyección disponible para {sport}.")
-    proj_file = st.file_uploader("Sube CSV de PROYECCIONES", type=["csv"], key="uploader_proj")
-    df = st.session_state.get("dataframes",{}).get(sport)
-    if df is None:
-        st.info("Primero carga tu CSV base en 'Demo & Datos'.")
-    elif proj_file is None:
-        st.warning("Sube tu archivo de proyecciones para simular.")
-    else:
-        df_proj = pd.read_csv(proj_file)
-        # Validate schemas
-        miss_base, _, _ = validate_schema(df, sport)
-        miss_proj, _, _ = validate_schema(df_proj, sport)
-        if miss_base:
-            st.error(f"Base inválida. Faltan columnas: {miss_base}")
-        elif miss_proj:
-            st.error(f"Proyección inválida. Faltan columnas: {miss_proj}")
+    
+    # Procesar simulación si ambos datasets están seleccionados
+    if base_dataset_id and proj_dataset_id:
+        df_base = get_dataset_data(base_dataset_id, sport)
+        df_proj = get_dataset_data(proj_dataset_id, sport)
+        
+        if df_base.empty or df_proj.empty:
+            st.error("Uno de los datasets seleccionados está vacío.")
         else:
-            if sport=="La Liga":
-                sim_df = merge_laliga_with_projections(df, df_proj)
-                table = compute_standings_laliga(sim_df)
-                st.success("Simulación aplicada: resultados actualizados con tus proyecciones.")
-                st.dataframe(table, use_container_width=True)
-                st.bar_chart(table.set_index('Equipo')["PTS"])
-            elif sport=="F1":
-                sim_df = merge_concat(df, df_proj)
-                drv, cons = compute_f1_points(sim_df)
-                st.success("Simulación aplicada a pilotos y constructores (concat de proyecciones).")
-                col1,col2 = st.columns(2)
-                with col1:
-                    st.dataframe(drv, use_container_width=True)
-                    st.bar_chart(drv.set_index("Piloto")["Puntos"])
-                with col2:
-                    st.dataframe(cons, use_container_width=True)
-                    st.bar_chart(cons.set_index("Equipo")["Puntos"])
-            elif sport=="MLB":
-                sim_df = merge_concat(df, df_proj)
-                summ = compute_mlb_summary(sim_df)
-                st.success("Simulación aplicada (concat de proyecciones).")
-                st.dataframe(summ, use_container_width=True)
-                st.bar_chart(summ.set_index("Equipo")["R"])
-            elif sport=="NFL":
-                sim_df = merge_concat(df, df_proj)
-                tbl = compute_nfl_table(sim_df)
-                st.success("Simulación aplicada (concat de proyecciones).")
-                st.dataframe(tbl, use_container_width=True)
-                st.bar_chart(tbl.set_index("Equipo")["W"])
-
-            # Offer to download a Simulator Excel with DATA + PROYECCIONES + RESUMEN
-            buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                df.to_excel(writer, index=False, sheet_name="DATA")
-                df_proj.to_excel(writer, index=False, sheet_name="PROYECCIONES")
-                # summaries
+            # Validar esquemas
+            miss_base, _, _ = validate_schema(df_base, sport)
+            miss_proj, _, _ = validate_schema(df_proj, sport)
+            
+            if miss_base:
+                st.error(f"Dataset base inválido. Faltan columnas: {miss_base}")
+            elif miss_proj:
+                st.error(f"Dataset proyección inválido. Faltan columnas: {miss_proj}")
+            else:
+                # Combinar datos y calcular resultados
                 if sport=="La Liga":
-                    compute_standings_laliga(sim_df).to_excel(writer, index=False, sheet_name="TABLA_SIM")
+                    sim_df = merge_laliga_with_projections(df_base, df_proj)
+                    table = compute_standings_laliga(sim_df)
+                    st.success("✅ Simulación aplicada: resultados actualizados con proyecciones.")
+                    st.dataframe(table, use_container_width=True)
+                    st.bar_chart(table.set_index('Equipo')["PTS"])
                 elif sport=="F1":
-                    d,c = compute_f1_points(sim_df)
-                    d.to_excel(writer, index=False, sheet_name="PILOTOS_SIM")
-                    c.to_excel(writer, index=False, sheet_name="CONSTRUCTORES_SIM")
+                    sim_df = merge_concat(df_base, df_proj)
+                    drv, cons = compute_f1_points(sim_df)
+                    st.success("✅ Simulación aplicada a pilotos y constructores.")
+                    col1,col2 = st.columns(2)
+                    with col1:
+                        st.dataframe(drv, use_container_width=True)
+                        st.bar_chart(drv.set_index("Piloto")["Puntos"])
+                    with col2:
+                        st.dataframe(cons, use_container_width=True)
+                        st.bar_chart(cons.set_index("Equipo")["Puntos"])
                 elif sport=="MLB":
-                    compute_mlb_summary(sim_df).to_excel(writer, index=False, sheet_name="RESUMEN_SIM")
+                    sim_df = merge_concat(df_base, df_proj)
+                    summ = compute_mlb_summary(sim_df)
+                    st.success("✅ Simulación aplicada.")
+                    st.dataframe(summ, use_container_width=True)
+                    st.bar_chart(summ.set_index("Equipo")["R"])
                 elif sport=="NFL":
-                    compute_nfl_table(sim_df).to_excel(writer, index=False, sheet_name="RESUMEN_SIM")
-            st.download_button(
-                "⬇️ Descargar Excel Simulador (DATA + PROYECCIONES + RESUMEN)",
-                data=buffer.getvalue(),
-                file_name=f"simulador_{sport.lower().replace(' ','_')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
+                    sim_df = merge_concat(df_base, df_proj)
+                    tbl = compute_nfl_table(sim_df)
+                    st.success("✅ Simulación aplicada.")
+                    st.dataframe(tbl, use_container_width=True)
+                    st.bar_chart(tbl.set_index("Equipo")["W"])
+
+                # Opción para descargar Excel simulador
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                    df_base.to_excel(writer, index=False, sheet_name="DATA_BASE")
+                    df_proj.to_excel(writer, index=False, sheet_name="PROYECCIONES")
+                    # Resúmenes
+                    if sport=="La Liga":
+                        compute_standings_laliga(sim_df).to_excel(writer, index=False, sheet_name="TABLA_SIM")
+                    elif sport=="F1":
+                        d,c = compute_f1_points(sim_df)
+                        d.to_excel(writer, index=False, sheet_name="PILOTOS_SIM")
+                        c.to_excel(writer, index=False, sheet_name="CONSTRUCTORES_SIM")
+                    elif sport=="MLB":
+                        compute_mlb_summary(sim_df).to_excel(writer, index=False, sheet_name="RESUMEN_SIM")
+                    elif sport=="NFL":
+                        compute_nfl_table(sim_df).to_excel(writer, index=False, sheet_name="RESUMEN_SIM")
+                
+                st.download_button(
+                    "⬇️ Descargar Excel Simulador (BASE + PROYECCIONES + RESUMEN)",
+                    data=buffer.getvalue(),
+                    file_name=f"simulador_{sport.lower().replace(' ','_')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+    else:
+        st.info("Selecciona ambos datasets (base y proyección) para ver la simulación.")
+        st.markdown("💡 **Tip:** Crea datasets de proyección marcando la casilla 'Es una proyección' al subir un CSV.")
 
 with tabs[3]:
     st.subheader("Generar Excel (Plantilla Freemium)")
-    df = st.session_state.get("dataframes",{}).get(sport)
-    if df is None:
-        st.info("Carga un CSV en la pestaña 'Demo & Datos'.")
+    dataset_id = st.session_state.get("selected_dataset_id")
+    
+    if not dataset_id:
+        st.info("Selecciona un dataset en la pestaña 'Demo & Datos'.")
     else:
-        missing, extra, expected = validate_schema(df, sport)
-        if missing:
-            st.error(f"Columnas faltantes: {missing}")
+        df = get_dataset_data(dataset_id, sport)
+        if df.empty:
+            st.warning("El dataset seleccionado no tiene datos.")
         else:
-            buffer = BytesIO()
-            with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
-                df.to_excel(writer, index=False, sheet_name="DATA")
-                if sport=="La Liga":
-                    compute_standings_laliga(df).to_excel(writer, index=False, sheet_name="TABLA")
-                elif sport=="F1":
-                    drv, cons = compute_f1_points(df)
-                    drv.to_excel(writer, index=False, sheet_name="PILOTOS")
-                    cons.to_excel(writer, index=False, sheet_name="CONSTRUCTORES")
-                elif sport=="MLB":
-                    compute_mlb_summary(df).to_excel(writer, index=False, sheet_name="RESUMEN")
-                elif sport=="NFL":
-                    compute_nfl_table(df).to_excel(writer, index=False, sheet_name="RESUMEN")
-                notes = pd.DataFrame({"Nota":[
-                    "Esta plantilla Freemium usa datos ficticios con esquema real.",
-                    "Reemplaza la hoja DATA con tus datos respetando las columnas esperadas.",
-                    "Para simulación, usa la pestaña 'Proyecciones (simula)' y descarga el Excel Simulador.",
-                    "Desbloquea Premium para simuladores y dashboards enriquecidos."
-                ]})
-                notes.to_excel(writer, index=False, sheet_name="INSTRUCCIONES")
-            st.download_button(
-                "⬇️ Descargar Excel Freemium",
-                data=buffer.getvalue(),
-                file_name=f"plantilla_{sport.lower().replace(' ','_')}_freemium.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True
-            )
-            st.success("Plantilla Excel generada.")
+            missing, extra, expected = validate_schema(df, sport)
+            if missing:
+                st.error(f"Columnas faltantes: {missing}")
+            else:
+                buffer = BytesIO()
+                with pd.ExcelWriter(buffer, engine="xlsxwriter") as writer:
+                    df.to_excel(writer, index=False, sheet_name="DATA")
+                    if sport=="La Liga":
+                        compute_standings_laliga(df).to_excel(writer, index=False, sheet_name="TABLA")
+                    elif sport=="F1":
+                        drv, cons = compute_f1_points(df)
+                        drv.to_excel(writer, index=False, sheet_name="PILOTOS")
+                        cons.to_excel(writer, index=False, sheet_name="CONSTRUCTORES")
+                    elif sport=="MLB":
+                        compute_mlb_summary(df).to_excel(writer, index=False, sheet_name="RESUMEN")
+                    elif sport=="NFL":
+                        compute_nfl_table(df).to_excel(writer, index=False, sheet_name="RESUMEN")
+                    notes = pd.DataFrame({"Nota":[
+                        "Esta plantilla Freemium usa datos almacenados en SQLite.",
+                        "Los datos se gestionan directamente en la aplicación.",
+                        "Para simulación, usa la pestaña 'Proyecciones' con datasets combinados.",
+                        "Desbloquea Premium para simuladores y dashboards enriquecidos."
+                    ]})
+                    notes.to_excel(writer, index=False, sheet_name="INSTRUCCIONES")
+                st.download_button(
+                    "⬇️ Descargar Excel Freemium",
+                    data=buffer.getvalue(),
+                    file_name=f"plantilla_{sport.lower().replace(' ','_')}_freemium.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+                st.success("Plantilla Excel generada desde datos SQLite.")
 
 
 with tabs[4]:
@@ -394,8 +663,6 @@ with premium_tabs[0]:
     st.markdown("Guarda hasta **3 escenarios** con tus proyecciones y compáralos lado a lado.")
     if "escenarios" not in st.session_state:
         st.session_state["escenarios"] = {}
-    if sport_s not in st.session_state["escenarios"]:
-        st.session_state["escenarios"][sport_s] = {}
 
     col_sel, col_label = st.columns([2,1])
     with col_sel:
@@ -576,3 +843,68 @@ with tabs[5]:
             mime="text/csv",
             key=f"dl_base_{sport_sel}"
         )
+with tabs[6]:
+    st.subheader("🗄️ Gestión Avanzada de Datasets")
+    st.markdown("Visualiza y gestiona todos tus datasets almacenados en SQLite.")
+    
+    username = st.session_state.get("username", "")
+    if not username:
+        st.warning("Inicia sesión para gestionar datasets.")
+    else:
+        # Mostrar todos los datasets del usuario
+        all_datasets = get_datasets(username)
+        
+        if not all_datasets:
+            st.info("No tienes datasets creados aún.")
+        else:
+            st.markdown("### Todos tus datasets")
+            
+            # Crear DataFrame para mostrar datasets
+            datasets_df = pd.DataFrame(all_datasets, columns=["ID", "Deporte", "Nombre", "Es_Proyección", "Fecha_Creación"])
+            datasets_df["Tipo"] = datasets_df["Es_Proyección"].apply(lambda x: "Proyección" if x else "Base")
+            datasets_df["Fecha"] = pd.to_datetime(datasets_df["Fecha_Creación"]).dt.strftime("%Y-%m-%d %H:%M")
+            
+            display_df = datasets_df[["ID", "Deporte", "Nombre", "Tipo", "Fecha"]].copy()
+            st.dataframe(display_df, use_container_width=True)
+            
+            # Gestión individual de datasets
+            st.markdown("### Acciones en Dataset")
+            col1, col2, col3 = st.columns([2, 1, 1])
+            
+            with col1:
+                dataset_to_manage = st.selectbox(
+                    "Seleccionar dataset", 
+                    options=[(row["ID"], f"{row['Nombre']} ({row['Deporte']}) - {row['Tipo']}") 
+                            for _, row in datasets_df.iterrows()],
+                    format_func=lambda x: x[1]
+                )
+                selected_id = dataset_to_manage[0] if dataset_to_manage else None
+            
+            with col2:
+                if st.button("👁️ Ver Datos") and selected_id:
+                    dataset_info = datasets_df[datasets_df["ID"] == selected_id].iloc[0]
+                    dataset_data = get_dataset_data(selected_id, dataset_info["Deporte"])
+                    st.markdown(f"#### Datos del dataset: {dataset_info['Nombre']}")
+                    st.dataframe(dataset_data, use_container_width=True)
+            
+            with col3:
+                if st.button("🗑️ Eliminar") and selected_id:
+                    if delete_dataset(selected_id):
+                        st.success("Dataset eliminado correctamente")
+                        st.rerun()
+            
+            # Estadísticas generales
+            st.markdown("### Estadísticas")
+            col1, col2, col3, col4 = st.columns(4)
+            
+            with col1:
+                st.metric("Total Datasets", len(all_datasets))
+            with col2:
+                base_count = sum(1 for d in all_datasets if not d[3])
+                st.metric("Datasets Base", base_count)
+            with col3:
+                proj_count = sum(1 for d in all_datasets if d[3])
+                st.metric("Proyecciones", proj_count)
+            with col4:
+                sports_count = len(set(d[1] for d in all_datasets))
+                st.metric("Deportes", sports_count)
